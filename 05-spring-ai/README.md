@@ -83,3 +83,45 @@ Run the application and tests:
 
 - Educational final project focused on AI plus architectural discipline.
 - External provider integration tests may require active credentials.
+
+---
+
+## 🆕 Minha evolução: validação de transações antes de salvar
+
+### O problema
+O modelo de IA pode errar ao transcrever ou extrair parâmetros (valor negativo, descrição vazia, categoria ausente).
+Sem validação, esses dados iam direto para o banco, tanto pelo endpoint REST quanto pelo Tool Calling.
+
+### O que mudou
+| Arquivo | Mudança |
+|---|---|
+| `domain/Transaction.java` | O construtor de criação valida: valor > 0, valor ≤ R$ 100.000,00, descrição obrigatória (máx. 255) e categoria obrigatória |
+| `domain/InvalidTransactionException.java` | Nova exceção de regra de negócio, com mensagem clara |
+| `infrastructure/http/ApiExceptionHandler.java` | Converte a exceção em **HTTP 400** com `{"error": "..."}` |
+| `prompts/system-message.st` | Instrui o modelo a enviar centavos e a explicar erros de ferramenta em vez de dizer que salvou |
+| `test/.../domain/TransactionTest.java` | 9 testes unitários das regras (não precisam de chave da OpenAI) |
+
+### Por que a regra está no domínio?
+`PersistTransactionUseCase` é usado pelo REST **e** como `@Tool` da IA. Validando em `Transaction`,
+as duas portas de entrada ficam protegidas pela mesma regra, sem duplicar código.
+O construtor usado para reconstruir dados do banco (`toDomain`) não valida, para não quebrar registros antigos.
+
+### Como testar
+```bash
+# Testes unitários (sem OpenAI)
+./gradlew test --tests "dio.budgeting.domain.TransactionTest"
+
+# REST: deve retornar 400
+curl -i -X POST localhost:8080/transactions -H "Content-Type: application/json" \
+  -d '{"description":"Mercado","category":"GROCERIES","amount":-500}'
+
+# REST: deve retornar 201
+curl -i -X POST localhost:8080/transactions -H "Content-Type: application/json" \
+  -d '{"description":"Mercado","category":"GROCERIES","amount":5000}'
+
+# IA: envie um áudio dizendo "gastei zero reais no mercado" e ouça a explicação
+curl -X POST localhost:8080/transactions/ai -F "file=@src/test/resources/audio/recording-1.m4a" --output resposta.mp3
+```
+
+### O que aprendi
+(escreva aqui com as suas palavras)
