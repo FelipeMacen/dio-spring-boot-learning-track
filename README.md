@@ -1,136 +1,187 @@
-# DIO Spring Boot Learning Track
+# Budgeting AI: API de orçamento controlada por voz (Spring Boot + Spring AI)
 
-This repository contains a DIO Spring Boot learning track organized as incremental modules.
-
-The track starts with architecture foundations and progressively moves through web APIs, data access, security, service integration, and AI-enabled workflows.
-
-<img width="2752" height="1536" alt="unnamed" src="https://github.com/user-attachments/assets/a7bcbe19-4d0c-4395-8696-8c64be22764f" />
-
-## Modules
-
-- [`00-domain-driven-design`](00-domain-driven-design/README.md)  
-  DDD foundations with a catalog domain and no web layer.
-- [`01-spring-web`](01-spring-web/README.md)  
-  REST API design with Spring Web and API documentation with Spring REST Docs.
-- [`02-spring-data`](02-spring-data/README.md)  
-  Data access in a multi-context application using MySQL, MongoDB, Redis, and PostgreSQL.
-- [`03-spring-security`](03-spring-security/README.md)  
-  Authentication and authorization with Spring Security in a proposal management API.
-- [`04-spring-cloud-openfeign`](04-spring-cloud-openfeign/README.md)  
-  External service integration (KYC/AML) using Spring Cloud OpenFeign and resilience patterns.
-- [`05-spring-ai`](05-spring-ai/README.md)  
-  Final project using Spring AI for speech-to-text, tool calling, and text-to-speech.
-
-## Recommended Study Order
-
-1. [`00-domain-driven-design`](00-domain-driven-design/README.md)
-2. [`01-spring-web`](01-spring-web/README.md)
-3. [`02-spring-data`](02-spring-data/README.md)
-4. [`03-spring-security`](03-spring-security/README.md)
-5. [`04-spring-cloud-openfeign`](04-spring-cloud-openfeign/README.md)
-6. [`05-spring-ai`](05-spring-ai/README.md)
+Projeto do **Desafio de Projeto com Spring AI** da DIO, baseado no repositório do expert
+[thpoiani / DIO Spring Boot Learning Track](https://github.com/digitalinnovationone/dio-spring-boot-learning-track)
+(pasta `05-spring-ai`), com uma melhoria própria: **validação de transações antes de salvar**.
 
 ---
 
-## Shared Architecture Guide
+## 📌 O que o projeto faz
 
-The sections below consolidate architecture topics that are intentionally reused across modules.
+É uma API de orçamento que entende **comandos de voz**. A pessoa envia um áudio dizendo, por exemplo,
+*"gastei 50 reais no mercado"* ou *"quais foram meus gastos com farmácia?"*, e a API registra ou consulta
+a transação e responde **também em áudio**.
 
-### DDD Layered Architecture
+Fluxo principal:
 
-Most modules follow the same conceptual split:
+1. O cliente envia um arquivo de áudio para `POST /transactions/ai`.
+2. O áudio é transcrito para texto (Whisper, via `TranscriptionModel`).
+3. O texto é enviado ao modelo de linguagem (`ChatClient`), que conhece as *tools* da aplicação.
+4. O modelo escolhe qual ferramenta chamar (`persist-transaction` ou `list-transactions-by-category`).
+5. A ferramenta executa um **caso de uso real**, que salva ou consulta no banco de dados.
+6. O modelo gera a resposta final em texto, convertida em MP3 (`TextToSpeechModel`) e devolvida ao cliente.
 
-```text
-domain/          -> business model, invariants, contracts
-application/     -> use cases, orchestration, application policies
-infrastructure/  -> adapters (HTTP, persistence, external clients, framework glue)
+Além do fluxo por voz, a API tem endpoints REST comuns:
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/transactions` | Cria uma transação (JSON) |
+| `GET` | `/transactions/{category}` | Lista transações por categoria (`GROCERIES`, `PHARMA`, `AUTO`) |
+| `POST` | `/transactions/ai` | Recebe áudio e devolve áudio (fluxo de IA) |
+
+### Organização do código
+
+```
+src/main/java/dio/budgeting
+├── domain           → modelo (Transaction, Category, TransactionId) e contrato do repositório
+├── application      → casos de uso (usados pelo REST e como @Tool da IA)
+└── infrastructure   → controller HTTP, JPA/MySQL e integração com o Spring AI
 ```
 
-Why this matters:
-
-- `domain` stays focused on business language and rules, not framework details.
-- `application` coordinates domain behavior for specific user/business actions.
-- `infrastructure` can change (database, web transport, external APIs) without forcing core business rewrites.
-
-This separation reduces coupling and supports long-term maintainability.
-
-### Java Class vs Java Record in Domain Modeling
-
-A practical guideline used across the track:
-
-- Use `class` for entities/aggregates that have identity and may evolve behavior over time.
-- Use `record` for immutable value objects and DTO-style transport models.
-
-Design trade-offs:
-
-- `class` supports richer lifecycle behavior and controlled mutation.
-- `record` reduces boilerplate and makes immutability explicit.
-
-This distinction improves code intent and keeps domain concepts clearer.
-
-### Strong Typed Identifiers
-
-Instead of passing raw primitives (`UUID`, `String`) everywhere, modules wrap identifiers in explicit types such as `BookId`, `TaskId`, `ProposalId`, and `TransactionId`.
-
-Benefits:
-
-- Better compile-time safety (fewer accidental ID mix-ups).
-- More expressive signatures (`findById(TaskId id)` communicates intent).
-- Cleaner evolution path for ID rules and validation.
-
-### Repository Pattern
-
-The repository contract belongs to the business side, while technology-specific implementations stay in infrastructure.
-
-Pattern used in this repository:
-
-- Domain contract: `XxxRepository` in `domain/`.
-- Adapter implementation: JPA/in-memory/etc. in `infrastructure/`.
-
-Architectural impact:
-
-- Business logic depends on abstractions, not persistence frameworks.
-- Switching storage technology becomes an adapter change, not a domain rewrite.
-- Unit testing use cases becomes simpler with fake/mock repositories.
-
-### Use Cases and Clean Architecture
-
-Each use case models one business capability (for example, create task, list proposals, analyze company risk).
-
-Common flow:
-
-1. Controller/listener receives an external request.
-2. It calls one application use case.
-3. The use case orchestrates domain objects and repository/gateway contracts.
-4. Infrastructure adapters handle persistence or external integrations.
-
-Why this is important:
-
-- Strong single-responsibility boundaries.
-- Easier testability and refactoring.
-- Better readability of business workflows.
-
-### Docker Compose Support in Development
-
-Several modules include `compose.yml` and Spring Boot Docker Compose support.
-
-Typical local development role:
-
-- Start required infra services (database/cache/message dependencies).
-- Keep local setup reproducible for all students.
-- Reduce onboarding friction by standardizing environment dependencies.
-
-Note: exact behavior can vary by module configuration and runtime profile.
+A IA não acessa o banco diretamente: ela só chama os mesmos casos de uso que o REST usa.
 
 ---
 
-## Quick Start
+## ▶️ Como executar a aplicação
 
-Choose a module and run its local instructions:
+**Pré-requisitos**
+
+- Java 25 (o `build.gradle` usa toolchain 25)
+- Docker em execução (o Spring Boot sobe o MySQL automaticamente pelo `compose.yml`)
+- Uma chave de API da OpenAI
+
+**Passos**
 
 ```bash
-cd 01-spring-web
-./gradlew test
+# 1. Clone o repositório e entre na pasta do projeto
+git clone <URL-DO-SEU-FORK>
+cd <seu-fork>/05-spring-ai
+
+# 2. Configure a chave da OpenAI
+export OPENAI_API_KEY="sua_chave_aqui"        # Linux/macOS
+# $env:OPENAI_API_KEY="sua_chave_aqui"        # PowerShell (Windows)
+
+# 3. Rode a aplicação
+./gradlew bootRun
 ```
 
-For module-specific details, always check each module README from the links above.
+A API fica disponível em `http://localhost:8080`. O MySQL sobe na porta `3307` via Docker Compose.
+
+---
+
+## 🆕 Qual melhoria eu implementei
+
+### Validação de transações antes de salvar
+
+**Problema:** o modelo de IA pode errar ao transcrever o áudio ou ao extrair os parâmetros
+(valor negativo, descrição vazia, categoria ausente). Sem validação, esses dados iam direto para o
+banco, tanto pelo REST quanto pelo Tool Calling.
+
+**Solução:** as regras de negócio foram colocadas no **domínio**, no construtor de criação de `Transaction`:
+
+- o valor deve ser maior que zero;
+- o valor deve ser de no máximo R$ 100.000,00 (guardado em centavos);
+- a descrição é obrigatória, com no máximo 255 caracteres;
+- a categoria é obrigatória.
+
+**O que mudou no projeto**
+
+| Arquivo | Mudança |
+|---|---|
+| `domain/Transaction.java` | O construtor de criação valida os dados. O construtor usado para ler do banco não valida, para não quebrar registros antigos |
+| `domain/InvalidTransactionException.java` | Nova exceção de regra de negócio, com mensagem clara |
+| `infrastructure/http/ApiExceptionHandler.java` | Converte a exceção em **HTTP 400** com `{"error": "..."}` |
+| `prompts/system-message.st` | Instrui o modelo a enviar valores em centavos e a explicar erros de ferramenta, em vez de dizer que salvou |
+| `test/.../domain/TransactionTest.java` | 9 testes unitários das regras, sem precisar de chave da OpenAI |
+
+**Por que no domínio?** O mesmo caso de uso (`PersistTransactionUseCase`) atende o REST e a IA.
+Validando em `Transaction`, as duas portas de entrada ficam protegidas pela mesma regra, sem código duplicado.
+
+---
+
+## 🛠️ Tecnologias utilizadas
+
+- **Java 25**
+- **Spring Boot 4**
+- **Spring AI** (`ChatClient`, Tool Calling com `@Tool`, `TranscriptionModel`, `TextToSpeechModel`)
+- **OpenAI**: `gpt-4o-mini` (chat), `whisper-1` (transcrição) e `gpt-4o-mini-tts` (voz)
+- **Spring Web** (REST) e **Spring Data JPA**
+- **MySQL 9** com **Docker Compose**
+- **Gradle**, **Lombok** e **JUnit 5 / AssertJ**
+
+---
+
+## 🧪 Como testar o fluxo principal
+
+### 1. Testes unitários (não precisam de OpenAI)
+
+```bash
+./gradlew test --tests "dio.budgeting.domain.TransactionTest"
+```
+
+### 2. Validação pelo REST
+
+```bash
+# Valor negativo → deve retornar 400 com mensagem de erro
+curl -i -X POST http://localhost:8080/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Mercado","category":"GROCERIES","amount":-500}'
+
+# Transação válida (R$ 50,00 = 5000 centavos) → deve retornar 201
+curl -i -X POST http://localhost:8080/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Mercado","category":"GROCERIES","amount":5000}'
+
+# Consulta por categoria
+curl http://localhost:8080/transactions/GROCERIES
+```
+
+### 3. Fluxo de IA (áudio → áudio)
+
+O projeto traz áudios de exemplo em `src/test/resources/audio/`.
+
+```bash
+curl -X POST http://localhost:8080/transactions/ai \
+  -F "file=@src/test/resources/audio/recording-1.m4a" \
+  --output resposta.mp3
+```
+
+Abra o `resposta.mp3` para ouvir a resposta. Depois confira o registro com
+`curl http://localhost:8080/transactions/GROCERIES`.
+
+Para testar a validação pela voz, grave um áudio dizendo algo como *"gastei zero reais no mercado"*
+e verifique que a resposta explica o problema em vez de confirmar o registro.
+
+> Os testes de integração com a OpenAI (`*IT.java`) só rodam se a variável `OPENAI_API_KEY` estiver definida.
+
+### 📸 Prints e exemplos
+
+<!-- Adicione aqui prints do terminal, das respostas dos curl ou do Postman/Insomnia -->
+
+---
+
+## 📚 O que aprendi durante o desafio
+
+- **O modelo não executa nada sozinho.** No Tool Calling, a IA só escolhe qual função chamar e com quais
+  parâmetros. Quem executa é o meu código Java, por isso as regras de negócio precisam estar no código,
+  não só no prompt.
+- **A IA é só mais uma porta de entrada.** Como o REST e as `@Tool` usam os mesmos casos de uso, não preciso
+  duplicar lógica, e uma regra no domínio protege os dois caminhos.
+- **Não dá para confiar cegamente na saída do modelo.** Ele pode errar na transcrição ou na extração dos
+  dados, então validar antes de persistir é essencial.
+- **Prompt e código se complementam.** Ajustei o `system-message.st` para o modelo enviar valores em centavos
+  e explicar erros, mas a garantia real vem da validação em Java.
+- **Entendi o pipeline completo de voz:** áudio → texto (Whisper) → intenção e ferramenta (LLM) →
+  banco de dados → texto → áudio (TTS), tudo configurado com `application.properties` e beans do Spring AI.
+- **Arquitetura em camadas ajuda a evoluir o projeto.** Consegui adicionar a melhoria mexendo em poucos
+  arquivos, porque cada camada tem uma responsabilidade clara.
+- **Detalhes de dinheiro importam.** O valor é guardado em centavos (`long`), e percebi que o
+  `TransactionOutput` formata o valor sem dividir por 100, um ponto que pode ser melhorado no futuro.
+- **Na prática:** aprendi a usar o Git/GitHub para entregar o projeto e a diagnosticar problemas quando o
+  `git add` não funcionou como esperado.
+
+## 🙏 Créditos
+
+Projeto base: [digitalinnovationone/dio-spring-boot-learning-track](https://github.com/digitalinnovationone/dio-spring-boot-learning-track),
+criado pelo expert Poiani para a DIO. A melhoria de validação e esta documentação foram desenvolvidas por mim
+como parte do desafio, com apoio de IA como ferramenta de estudo.
